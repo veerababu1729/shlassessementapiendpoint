@@ -1,0 +1,13 @@
+name,url,remote_testing,adaptive_irt,duration,test_type
+Verify Numerical Reasoning Test,https://www.shl.com/solutions/products/verify-numerical-reasoning-test/,Yes,Yes,18 minutes,Cognitive
+Verify Verbal Reasoning Test,https://www.shl.com/solutions/products/verify-verbal-reasoning-test/,Yes,Yes,17 minutes,Cognitive
+Verify Coding Pro,https://www.shl.com/solutions/products/verify-coding-pro/,Yes,No,60 minutes,Technical
+OPQ Personality Assessment,https://www.shl.com/solutions/products/opq/,Yes,No,25 minutes,Personality
+Java Programming Test,https://www.shl.com/solutions/products/java-programming-test/,Yes,No,30 minutes,Technical
+Python Programming Test,https://www.shl.com/solutions/products/python-programming-test/,Yes,No,30 minutes,Technical
+SQL Test,https://www.shl.com/solutions/products/sql-test/,Yes,No,30 minutes,Technical
+JavaScript Test,https://www.shl.com/solutions/products/javascript-test/,Yes,No,30 minutes,Technical
+Workplace Personality Assessment,https://www.shl.com/solutions/products/workplace-personality/,Yes,No,20 minutes,Personality
+Business Simulation,https://www.shl.com/solutions/products/business-simulation/,Yes,No,40 minutes,Simulation
+General Ability Test,https://www.shl.com/solutions/products/general-ability/,Yes,Yes,30 minutes,Cognitive
+Teamwork Assessment,https://www.shl.com/solutions/products/teamwork-assessment/,Yes,No,15 minutes,Behavioral
