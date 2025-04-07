@@ -1,0 +1,5 @@
+Flask
+pandas
+numpy
+scikit-learn
+google-generativeai==0.8.4
