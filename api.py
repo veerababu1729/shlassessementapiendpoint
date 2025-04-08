@@ -6,6 +6,9 @@ import google.generativeai as genai
 import os
 
 app = Flask(__name__)
+@app.get("/health")
+def health_check():
+    return {"status": "healthy"}
 
 # Configure Gemini API key
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
