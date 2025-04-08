@@ -123,6 +123,3 @@ curl -X POST https://shlassessementapiendpoint.onrender.com/recommend \
 -H "Content-Type: application/json" \
 -d '{"query": "Looking to hire analysts with strong cognitive and personality skills."}'
 ```
-
----
-
