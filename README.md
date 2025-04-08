@@ -79,6 +79,15 @@ STEP 2 – JSON API Endpoint (Render)**
 ---
 
 ### 🔧 Here are 3 Easy Ways to Test API End Points:
+Test the health endpoint in browser:👇
+
+https://shlassessementapiendpoint.onrender.com/health
+
+You should see:
+{
+  "status": "healthy"
+}
+
 
 #### **1. Use Python Script (Recommended)**
 Run this locally in a `.py` file or Jupyter Notebook:
