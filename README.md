@@ -18,7 +18,7 @@ Create a system to recommend the most relevant SHL assessments based on a job de
 🧠 Approach Summary
 
 STEP 1 – Web UI (Streamlit)**
-
+  Access Here: **Live UI Webapp:** [https://shlassesmentrecommendationsystem.streamlit.app/  
 - Built using **Streamlit** for a clean user interface.
 - Users input a job description or role requirement.
 - The system embeds both query and test descriptions using **Google Gemini Embedding API** (`models/embedding-001`).
@@ -73,4 +73,50 @@ STEP 2 – JSON API Endpoint (Render)**
   ]
 }
 ```
+
+You're seeing the **"Method Not Allowed"** error because your `/recommend` endpoint **only accepts `POST` requests**, but you're likely trying to access it via a **browser** or an HTTP `GET` request — which it doesn't support.
+
+### ✅ To test it correctly:
+You must send a **`POST` request** with a **JSON body**.
+
+---
+
+### 🔧 Here are 3 Easy Ways to Test It:
+
+#### **1. Use Python Script (Recommended)**
+Run this locally in a `.py` file or Jupyter Notebook:
+```python
+import requests
+
+url = "https://shlassessementapiendpoint.onrender.com/recommend"
+payload = {"query": "I am hiring for Java developers who can also collaborate effectively with my business teams. Looking for an assessment(s) that can be completed in 40 minutes."}
+
+response = requests.post(url, json=payload)
+
+print("Status:", response.status_code)
+print("Results:\n", response.json())
+```
+
+---
+
+#### **2. Use [Postman](https://www.postman.com/)**
+- Method: `POST`
+- URL: `https://shlassessementapiendpoint.onrender.com/recommend`
+- Body → `raw` → `JSON`:
+```json
+{
+  "query": "Looking to hire mid-level professionals skilled in Python, SQL, and JavaScript."
+}
+```
+
+---
+
+#### **3. Use `curl` in Terminal**
+```bash
+curl -X POST https://shlassessementapiendpoint.onrender.com/recommend \
+-H "Content-Type: application/json" \
+-d '{"query": "Looking to hire analysts with strong cognitive and personality skills."}'
+```
+
+---
 
