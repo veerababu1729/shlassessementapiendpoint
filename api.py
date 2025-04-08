@@ -6,6 +6,8 @@ import google.generativeai as genai
 import os
 
 app = Flask(__name__)
+
+# ✅ Health check endpoint for API status
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}
