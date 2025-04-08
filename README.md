@@ -74,14 +74,11 @@ STEP 2 – JSON API Endpoint (Render)**
 }
 ```
 
-You're seeing the **"Method Not Allowed"** error because your `/recommend` endpoint **only accepts `POST` requests**, but you're likely trying to access it via a **browser** or an HTTP `GET` request — which it doesn't support.
 
-### ✅ To test it correctly:
-You must send a **`POST` request** with a **JSON body**.
 
 ---
 
-### 🔧 Here are 3 Easy Ways to Test It:
+### 🔧 Here are 3 Easy Ways to Test API End Points:
 
 #### **1. Use Python Script (Recommended)**
 Run this locally in a `.py` file or Jupyter Notebook:
