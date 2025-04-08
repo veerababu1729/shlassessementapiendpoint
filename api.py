@@ -4,6 +4,7 @@ import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 import google.generativeai as genai
 import os
+import re
 
 app = Flask(__name__)
 
@@ -50,11 +51,78 @@ descriptions = {
 }
 df["description"] = df["name"].map(descriptions)
 
+# Define semantic concepts and their related terms for each assessment
+semantic_concepts = {
+    "Java Programming Test": {
+        "primary": ["java", "java programming", "java developer", "java development"],
+        "secondary": ["programming", "coding", "development", "backend", "enterprise", "spring", "hibernate"],
+        "excluded": ["javascript", "js", "frontend", "python"]
+    },
+    "JavaScript Test": {
+        "primary": ["javascript", "js", "frontend", "web development", "frontend developer"],
+        "secondary": ["programming", "coding", "development", "web", "react", "angular", "vue"],
+        "excluded": []
+    },
+    "Python Programming Test": {
+        "primary": ["python", "python programming", "python developer", "data science"],
+        "secondary": ["programming", "coding", "development", "data analysis", "machine learning", "AI"],
+        "excluded": []
+    },
+    "SQL Test": {
+        "primary": ["sql", "database", "data", "query"],
+        "secondary": ["data management", "database design", "data engineering"],
+        "excluded": []
+    },
+    "Teamwork Assessment": {
+        "primary": ["team", "teamwork", "collaboration", "cooperate", "collaborate"],
+        "secondary": ["interpersonal", "communication", "group work", "soft skills"],
+        "excluded": []
+    },
+    "OPQ Personality Assessment": {
+        "primary": ["personality", "character", "behavior", "traits"],
+        "secondary": ["soft skills", "interpersonal", "work style", "culture fit"],
+        "excluded": []
+    },
+    "Workplace Personality Assessment": {
+        "primary": ["workplace", "personality", "behavior", "traits"],
+        "secondary": ["soft skills", "interpersonal", "work style", "culture fit"],
+        "excluded": []
+    },
+    "Business Simulation": {
+        "primary": ["business", "simulation", "scenario", "strategy"],
+        "secondary": ["decision making", "management", "leadership", "executive"],
+        "excluded": []
+    },
+    "General Ability Test": {
+        "primary": ["general ability", "aptitude", "intelligence", "cognitive"],
+        "secondary": ["reasoning", "problem solving", "analytical thinking"],
+        "excluded": []
+    },
+    "Verify Numerical Reasoning Test": {
+        "primary": ["numerical", "math", "quantitative", "calculations"],
+        "secondary": ["reasoning", "problem solving", "analysis", "data interpretation"],
+        "excluded": []
+    },
+    "Verify Verbal Reasoning Test": {
+        "primary": ["verbal", "language", "reading", "comprehension"],
+        "secondary": ["reasoning", "communication", "analysis", "critical thinking"],
+        "excluded": []
+    },
+    "Verify Coding Pro": {
+        "primary": ["coding", "programming", "development", "technical skills"],
+        "secondary": ["problem solving", "algorithms", "software engineering"],
+        "excluded": []
+    }
+}
+
 # Add full_text column for embedding comparison
 df["full_text"] = df.apply(
     lambda row: f"{row['name']} is a {row['test_type']} assessment with duration of {row['duration']}. {row['description']}", 
     axis=1
 )
+
+# Create semantic concept mapping for each assessment
+df["semantic_concepts"] = df["name"].map(semantic_concepts)
 
 # Embed function
 def get_embedding(text):
@@ -69,61 +137,116 @@ def get_embedding(text):
         print(f"Error generating embedding: {e}")
         raise
 
-# Check if an assessment is relevant based on keywords in query
-def is_relevant_to_query(assessment_text, query_terms):
-    assessment_text = assessment_text.lower()
-    # Extract important words from query (remove common words)
-    query_terms = [term.lower() for term in query_terms.split() 
-                  if len(term) > 2 and term.lower() not in ['the', 'and', 'for', 'with']]
-    
-    # Count how many query terms appear in the assessment text
-    matches = sum(1 for term in query_terms if term in assessment_text)
-    
-    # Consider relevant if at least one term matches or if the query is very short
-    return matches > 0 or len(query_terms) == 0
-
-# Function to filter relevant assessments by excluding obvious mismatches
-def filter_irrelevant_tests(df, query):
+# Extract key concepts from the query
+def extract_key_concepts(query):
+    # Normalize query text
     query = query.lower()
     
-    # Special case handling for common language/tech queries
-    filtered_df = df.copy()
+    # Remove common stop words and keep important terms
+    words = re.findall(r'\b\w+\b', query)
+    stop_words = {'a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'with', 'by', 'about', 'like', 'who', 'also', 'can'}
+    important_terms = [word for word in words if word not in stop_words and len(word) > 2]
     
-    # Handle programming language specific queries
-    if 'java ' in query or query == 'java' or 'java developer' in query:
-        # For Java queries, prioritize Java tests and exclude non-relevant languages
-        relevant_terms = ['java', 'javascript', 'sql', 'programming', 'coding', 'developer']
-        filtered_df = filtered_df[filtered_df['full_text'].str.lower().apply(
-            lambda text: any(term in text.lower() for term in relevant_terms))]
-        
-    elif 'python' in query:
-        # For Python queries, prioritize Python tests
-        relevant_terms = ['python', 'programming', 'data science', 'sql', 'coding']
-        filtered_df = filtered_df[filtered_df['full_text'].str.lower().apply(
-            lambda text: any(term in text.lower() for term in relevant_terms))]
+    # Look for compound concepts (e.g., "Java developer", "team work")
+    compound_concepts = []
+    for i in range(len(words) - 1):
+        if words[i] not in stop_words or words[i+1] not in stop_words:
+            compound_concepts.append(f"{words[i]} {words[i+1]}")
     
-    # Add more language/tech specific filters as needed
+    # Add trigrams if they might be meaningful
+    for i in range(len(words) - 2):
+        if not all(word in stop_words for word in [words[i], words[i+1], words[i+2]]):
+            compound_concepts.append(f"{words[i]} {words[i+1]} {words[i+2]}")
     
-    # If filtering removed all options, revert to original dataset
-    if len(filtered_df) == 0:
-        return df
+    # Combine all extracted concepts
+    all_concepts = important_terms + compound_concepts
     
-    return filtered_df
+    # Look for specific skills/domains typically assessed
+    skill_domains = {
+        "programming": ["coding", "programming", "developer", "software", "engineer"],
+        "language_specific": ["java", "python", "javascript", "js", "sql", "html", "css"],
+        "teamwork": ["team", "teamwork", "collaborate", "collaboration", "interpersonal"],
+        "cognitive": ["reasoning", "cognitive", "thinking", "intelligence", "aptitude", "problem solving"],
+        "personality": ["personality", "behavior", "traits", "character", "temperament"],
+        "technical": ["technical", "coding", "programming", "development", "engineering"],
+        "business": ["business", "management", "leadership", "strategy", "decision"]
+    }
+    
+    # Identify which domains are present in the query
+    identified_domains = {}
+    for domain, terms in skill_domains.items():
+        domain_matches = [term for term in terms if any(term in concept for concept in all_concepts)]
+        if domain_matches:
+            identified_domains[domain] = domain_matches
+    
+    return {
+        "terms": important_terms,
+        "compounds": compound_concepts,
+        "all_concepts": all_concepts,
+        "domains": identified_domains
+    }
 
-# Dynamic threshold based on overall score distribution
-def get_dynamic_threshold(scores, default_min=0.60):
-    if len(scores) < 5:
-        return default_min
+# Semantic scoring function
+def calculate_semantic_relevance(assessment, extracted_concepts):
+    semantic_data = assessment.get("semantic_concepts", {})
+    if not semantic_data:
+        return 0.0
     
-    # Use statistical approaches to find natural cutoffs
-    mean_score = np.mean(scores)
-    std_score = np.std(scores)
+    score = 0.0
     
-    # More aggressive threshold: mean + 0.25*std deviation 
-    threshold = mean_score + 0.25 * std_score
+    # Check for primary concept matches (highest weight)
+    primary_matches = sum(1 for concept in extracted_concepts["all_concepts"] 
+                         if any(primary_term in concept for primary_term in semantic_data.get("primary", [])))
+    score += primary_matches * 3.0
     
-    # Don't go below our minimum acceptable threshold
-    return max(threshold, default_min)
+    # Check for secondary concept matches (medium weight)
+    secondary_matches = sum(1 for concept in extracted_concepts["all_concepts"] 
+                           if any(secondary_term in concept for secondary_term in semantic_data.get("secondary", [])))
+    score += secondary_matches * 1.5
+    
+    # Check for domain relevance
+    for domain, terms in extracted_concepts["domains"].items():
+        if domain == "language_specific":
+            # Special handling for programming languages to ensure exact matches
+            for term in terms:
+                if term in semantic_data.get("primary", []):
+                    score += 4.0  # Strong boost for exact language match
+                elif term in semantic_data.get("excluded", []):
+                    score -= 5.0  # Strong penalty for excluded languages
+        elif domain in ["programming", "technical"] and assessment["test_type"] == "Technical":
+            score += 2.0
+        elif domain == "teamwork" and "Teamwork Assessment" in assessment["name"]:
+            score += 3.0
+        elif domain == "personality" and "Personality" in assessment["test_type"]:
+            score += 3.0
+        elif domain == "cognitive" and "Cognitive" in assessment["test_type"]:
+            score += 3.0
+        elif domain == "business" and "Business" in assessment["name"]:
+            score += 3.0
+    
+    # Check for exclusions (negative weight)
+    exclusion_matches = sum(1 for concept in extracted_concepts["all_concepts"] 
+                           if any(excluded_term in concept for excluded_term in semantic_data.get("excluded", [])))
+    score -= exclusion_matches * 4.0
+    
+    # Special case: If looking specifically for Java developers but not JavaScript
+    if "java" in extracted_concepts["terms"] and "javascript" not in extracted_concepts["terms"] and "js" not in extracted_concepts["terms"]:
+        if "Java Programming Test" in assessment["name"]:
+            score += 2.0  # Boost Java test
+        elif "JavaScript Test" in assessment["name"]:
+            score -= 3.0  # Penalize JavaScript test
+    
+    # Duration constraints - if mentioned in query
+    duration_terms = ["time", "minutes", "duration", "quick", "fast", "short", "long"]
+    if any(term in " ".join(extracted_concepts["all_concepts"]) for term in duration_terms):
+        # Prefer shorter tests if query mentions time constraints
+        duration_mins = int(''.join(filter(str.isdigit, assessment["duration"])))
+        if duration_mins <= 20:
+            score += 1.0  # Boost for short tests
+        elif duration_mins >= 45:
+            score -= 1.0  # Penalty for long tests
+    
+    return max(score, 0.0)  # Ensure we don't return negative scores
 
 @app.route('/recommend', methods=['POST'])
 def recommend():
@@ -134,43 +257,52 @@ def recommend():
         if not query:
             return jsonify({"error": "Missing query"}), 400
         
-        # First filter obviously irrelevant tests based on keyword matching
-        filtered_df = filter_irrelevant_tests(df, query)
+        # Extract semantic concepts from query
+        extracted_concepts = extract_key_concepts(query)
         
+        # Calculate vector embedding for query for comparison
         query_vec = get_embedding(query)
         
-        # Calculate scores with boost for relevant matches
-        filtered_df = filtered_df.copy()
-        filtered_df["score"] = 0.0
+        # Create results dataframe with all relevant data
+        results_df = df.copy()
         
-        for index, row in filtered_df.iterrows():
+        # Calculate semantic relevance score
+        results_df["semantic_score"] = results_df.apply(
+            lambda row: calculate_semantic_relevance({
+                "name": row["name"],
+                "test_type": row["test_type"],
+                "semantic_concepts": row["semantic_concepts"],
+                "duration": row["duration"]
+            }, extracted_concepts), 
+            axis=1
+        )
+        
+        # Calculate embedding similarity score
+        for index, row in results_df.iterrows():
             try:
                 doc_vec = get_embedding(row["full_text"])
                 similarity_score = cosine_similarity([query_vec], [doc_vec])[0][0]
-                
-                # Give a boost to assessments that match keywords in query
-                if is_relevant_to_query(row["full_text"], query):
-                    similarity_score += 0.1  # Boost matching assessments
-                
-                filtered_df.at[index, "score"] = similarity_score
+                results_df.at[index, "embedding_score"] = similarity_score
             except Exception as e:
                 print(f"Error processing assessment {row.get('name', 'Unknown')}: {e}")
+                results_df.at[index, "embedding_score"] = 0.0
         
-        # Sort by relevance score
-        sorted_df = filtered_df.sort_values("score", ascending=False)
+        # Combine scores (weighted approach)
+        results_df["final_score"] = (0.7 * results_df["semantic_score"]) + (0.3 * results_df["embedding_score"])
         
-        # Get a dynamic threshold based on score distribution
-        all_scores = sorted_df["score"].values
-        dynamic_threshold = get_dynamic_threshold(all_scores)
+        # Sort by combined score
+        sorted_df = results_df.sort_values("final_score", ascending=False)
         
-        # Filter by relevance threshold to ensure results are relevant
-        relevant_df = sorted_df[sorted_df["score"] >= dynamic_threshold]
+        # Determine how many results to return
+        # More sophisticated logic could be used here based on score distribution
+        score_threshold = 0.5
+        relevant_df = sorted_df[sorted_df["final_score"] >= score_threshold]
         
-        # Ensure we show between 1-10 results
+        # Ensure we show between 1-5 results
         if len(relevant_df) == 0:
-            top_df = sorted_df.head(1)
-        elif len(relevant_df) > 10:
-            top_df = relevant_df.head(10)
+            top_df = sorted_df.head(2)  # Show top 2 if none meet threshold
+        elif len(relevant_df) > 5:
+            top_df = relevant_df.head(5)  # Limit to top 5
         else:
             top_df = relevant_df
             
@@ -183,8 +315,7 @@ def recommend():
             # Format test_type as list (from the screenshot it appears test_type is an array)
             test_type_list = [row["test_type"]]
             if row["test_type"] == "Behavioral":
-                # For demonstration - adding multiple test types for certain assessments 
-                # as shown in your screenshot
+                # For demonstration - adding multiple test types for certain assessments
                 test_type_list = ["Competencies", "Personality & Behaviour"]
             
             result = {
