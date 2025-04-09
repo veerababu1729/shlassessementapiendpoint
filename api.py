@@ -45,202 +45,223 @@ test_type_mappings = {
     "Simulation": ["Competencies"]
 }
 
-# Define semantic concepts and their related terms for each assessment
-semantic_concepts = {
+# Refine keywords to be more specific and avoid false positives
+assessment_keywords = {
     "Java Programming Test": {
-        "primary": ["java", "java programming", "java developer", "java development"],
-        "secondary": ["programming", "coding", "development", "backend", "enterprise", "spring", "hibernate"],
-        "excluded": ["javascript", "js", "frontend", "python"]
+        "must_include": ["java"],
+        "boost_terms": ["java developer", "java programming", "j2ee", "spring", "hibernate"],
+        "excludes": ["javascript", "js", "python", "ruby", "php"]
     },
     "JavaScript Test": {
-        "primary": ["javascript", "js", "frontend", "web development", "frontend developer"],
-        "secondary": ["programming", "coding", "development", "web", "react", "angular", "vue"],
-        "excluded": []
+        "must_include": ["javascript", "js", "frontend"],
+        "boost_terms": ["web developer", "frontend", "react", "angular", "vue", "node"],
+        "excludes": ["java developer"]
     },
     "Python Programming Test": {
-        "primary": ["python", "python programming", "python developer", "data science"],
-        "secondary": ["programming", "coding", "development", "data analysis", "machine learning", "AI"],
-        "excluded": []
+        "must_include": ["python"],
+        "boost_terms": ["data science", "machine learning", "django", "flask", "pandas"],
+        "excludes": ["java", "javascript", "ruby"]
     },
     "SQL Test": {
-        "primary": ["sql", "database", "data", "query"],
-        "secondary": ["data management", "database design", "data engineering"],
-        "excluded": []
+        "must_include": ["sql", "database"],
+        "boost_terms": ["data", "database", "query", "postgresql", "mysql"],
+        "excludes": []
     },
     "Teamwork Assessment": {
-        "primary": ["team", "teamwork", "collaboration", "cooperate", "collaborate"],
-        "secondary": ["interpersonal", "communication", "group work", "soft skills"],
-        "excluded": []
+        "must_include": ["team", "teamwork", "collaboration", "cooperate"],
+        "boost_terms": ["interpersonal", "communication", "group work", "soft skills"],
+        "excludes": []
     },
     "OPQ Personality Assessment": {
-        "primary": ["personality", "character", "behavior", "traits"],
-        "secondary": ["soft skills", "interpersonal", "work style", "culture fit"],
-        "excluded": []
+        "must_include": ["personality", "character", "behavior"],
+        "boost_terms": ["traits", "soft skills", "culture fit"],
+        "excludes": []
     },
     "Workplace Personality Assessment": {
-        "primary": ["workplace", "personality", "behavior", "traits"],
-        "secondary": ["soft skills", "interpersonal", "work style", "culture fit"],
-        "excluded": []
+        "must_include": ["personality", "workplace"],
+        "boost_terms": ["work style", "professional behavior"],
+        "excludes": []
     },
     "Business Simulation": {
-        "primary": ["business", "simulation", "scenario", "strategy"],
-        "secondary": ["decision making", "management", "leadership", "executive"],
-        "excluded": []
+        "must_include": ["business", "simulation", "management"],
+        "boost_terms": ["strategy", "leadership", "executive"],
+        "excludes": []
     },
     "General Ability Test": {
-        "primary": ["general ability", "aptitude", "intelligence", "cognitive"],
-        "secondary": ["reasoning", "problem solving", "analytical thinking"],
-        "excluded": []
+        "must_include": ["general", "aptitude", "cognitive"],
+        "boost_terms": ["intelligence", "reasoning", "problem solving"],
+        "excludes": []
     },
     "Verify Numerical Reasoning Test": {
-        "primary": ["numerical", "math", "quantitative", "calculations"],
-        "secondary": ["reasoning", "problem solving", "analysis", "data interpretation"],
-        "excluded": []
+        "must_include": ["numerical", "math", "quantitative"],
+        "boost_terms": ["calculations", "data interpretation"],
+        "excludes": []
     },
     "Verify Verbal Reasoning Test": {
-        "primary": ["verbal", "language", "reading", "comprehension"],
-        "secondary": ["reasoning", "communication", "analysis", "critical thinking"],
-        "excluded": []
+        "must_include": ["verbal", "language", "reading"],
+        "boost_terms": ["comprehension", "communication"],
+        "excludes": []
     },
     "Verify Coding Pro": {
-        "primary": ["coding", "programming", "development", "technical skills"],
-        "secondary": ["problem solving", "algorithms", "software engineering"],
-        "excluded": []
+        "must_include": ["coding", "programming", "developer"],
+        "boost_terms": ["algorithm", "software engineer"],
+        "excludes": []
     }
 }
 
-# Add full_text column for embedding comparison
-df["full_text"] = df.apply(
-    lambda row: f"{row['name']} is a {row['test_type']} assessment with duration of {row['duration']}. {row.get('description', '')}", 
-    axis=1
-)
-
-# Create semantic concept mapping for each assessment
-df["semantic_concepts"] = df["name"].map(semantic_concepts)
-
-# Embed function
-def get_embedding(text):
+# Use Gemini to analyze the query
+def analyze_query_with_gemini(query):
     try:
-        response = genai.embed_content(
-            model="models/embedding-001",
-            content=text,
-            task_type="retrieval_document"
-        )
-        return np.array(response["embedding"])
+        model = genai.GenerativeModel('gemini-pro')
+        
+        prompt = f"""
+        Based on the following job description or query, identify the EXACT skills, roles, and qualities being sought.
+        
+        Job Description/Query: "{query}"
+        
+        Please respond in the following JSON format only:
+        {{
+            "primary_skills": ["skill1", "skill2"],  // Technical or specific skills (e.g. Java, Python, SQL)
+            "soft_skills": ["skill1", "skill2"],     // Soft skills (e.g. teamwork, communication)
+            "roles": ["role1", "role2"],             // Job roles (e.g. developer, analyst)
+            "experience_level": "entry/mid/senior",  // Experience level mentioned
+            "time_constraints": true/false           // Whether time or speed is mentioned
+        }}
+        
+        Your response should ONLY include the JSON, nothing else.
+        """
+        
+        response = model.generate_content(prompt)
+        response_text = response.text
+        
+        # Extract just the JSON part
+        json_match = re.search(r'({.*})', response_text.replace('\n', ' '), re.DOTALL)
+        if json_match:
+            try:
+                import json
+                analysis = json.loads(json_match.group(1))
+                return analysis
+            except json.JSONDecodeError:
+                return None
+        return None
     except Exception as e:
-        print(f"Error generating embedding: {e}")
-        # Return a zero vector as fallback
-        return np.zeros(768)  # Adjust dimension based on your embedding model
+        print(f"Error in Gemini analysis: {e}")
+        return None
 
-# Extract key concepts from the query
-def extract_key_concepts(query):
-    # Normalize query text
-    query = query.lower()
+# Improved relevance function using Gemini analysis and strict filtering
+def filter_and_score_assessments(query, df):
+    # Basic query processing
+    query_lower = query.lower()
     
-    # Remove common stop words and keep important terms
-    words = re.findall(r'\b\w+\b', query)
-    stop_words = {'a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'with', 'by', 'about', 'like', 'who', 'also', 'can'}
-    important_terms = [word for word in words if word not in stop_words and len(word) > 2]
+    # Get Gemini analysis
+    gemini_analysis = analyze_query_with_gemini(query)
     
-    # Look for compound concepts (e.g., "Java developer", "team work")
-    compound_concepts = []
-    for i in range(len(words) - 1):
-        if words[i] not in stop_words or words[i+1] not in stop_words:
-            compound_concepts.append(f"{words[i]} {words[i+1]}")
+    # Extract all skills and roles from Gemini analysis
+    all_terms = []
+    if gemini_analysis:
+        all_terms.extend(gemini_analysis.get('primary_skills', []))
+        all_terms.extend(gemini_analysis.get('soft_skills', []))
+        all_terms.extend(gemini_analysis.get('roles', []))
     
-    # Add trigrams if they might be meaningful
-    for i in range(len(words) - 2):
-        if not all(word in stop_words for word in [words[i], words[i+1], words[i+2]]):
-            compound_concepts.append(f"{words[i]} {words[i+1]} {words[i+2]}")
+    # Fallback to basic keyword extraction if Gemini fails
+    if not all_terms:
+        words = query_lower.split()
+        stop_words = {'a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'with', 'by', 'about'}
+        all_terms = [word for word in words if word not in stop_words and len(word) > 2]
     
-    # Combine all extracted concepts
-    all_concepts = important_terms + compound_concepts
+    results = []
     
-    # Look for specific skills/domains typically assessed
-    skill_domains = {
-        "programming": ["coding", "programming", "developer", "software", "engineer"],
-        "language_specific": ["java", "python", "javascript", "js", "sql", "html", "css"],
-        "teamwork": ["team", "teamwork", "collaborate", "collaboration", "interpersonal"],
-        "cognitive": ["reasoning", "cognitive", "thinking", "intelligence", "aptitude", "problem solving"],
-        "personality": ["personality", "behavior", "traits", "character", "temperament"],
-        "technical": ["technical", "coding", "programming", "development", "engineering"],
-        "business": ["business", "management", "leadership", "strategy", "decision"]
-    }
+    for index, row in df.iterrows():
+        assessment_name = row['name']
+        keywords = assessment_keywords.get(assessment_name, {})
+        
+        # Check if assessment has required keywords
+        must_include = keywords.get('must_include', [])
+        excludes = keywords.get('excludes', [])
+        
+        # Initialize score and relevance flag
+        score = 0
+        relevant = False
+        
+        # Check for must-include terms
+        if must_include:
+            for term in must_include:
+                if term in query_lower:
+                    relevant = True
+                    score += 5
+                    break
+        
+        # If not relevant by must-include, check Gemini analysis
+        if not relevant and gemini_analysis:
+            # Check primary skills
+            for skill in gemini_analysis.get('primary_skills', []):
+                if any(must_term in skill.lower() for must_term in must_include):
+                    relevant = True
+                    score += 5
+                    break
+            
+            # Special case for Teamwork Assessment
+            if assessment_name == "Teamwork Assessment" and any(
+                team_term in skill.lower() for skill in gemini_analysis.get('soft_skills', [])
+                for team_term in ['team', 'collaborate', 'interpersonal']
+            ):
+                relevant = True
+                score += 5
+        
+        # Check for exclusions - disqualify if found
+        for term in excludes:
+            if term in query_lower:
+                relevant = False
+                break
+                
+        # Only continue if assessment is relevant
+        if relevant:
+            # Add scores for boost terms
+            boost_terms = keywords.get('boost_terms', [])
+            for term in boost_terms:
+                if term in query_lower:
+                    score += 2
+            
+            # Check experience level match (if provided by Gemini)
+            if gemini_analysis and 'experience_level' in gemini_analysis:
+                exp_level = gemini_analysis['experience_level'].lower()
+                if "entry" in exp_level and "entry" in row.get('description', '').lower():
+                    score += 1
+                elif "mid" in exp_level and "mid" in row.get('description', '').lower():
+                    score += 1
+                elif "senior" in exp_level and "senior" in row.get('description', '').lower():
+                    score += 1
+            
+            # Adjust score based on time constraints
+            if gemini_analysis and gemini_analysis.get('time_constraints', False):
+                duration_mins = int(''.join(filter(str.isdigit, row["duration"])))
+                if duration_mins <= 20:
+                    score += 1  # Boost for short tests
+                elif duration_mins >= 45:
+                    score -= 1  # Penalty for long tests
+            
+            # Calculate embedding similarity with Gemini (optional - can be removed for simplicity)
+            # This step is omitted for simplicity
+            
+            # Format the assessment data
+            duration_value = int(''.join(filter(str.isdigit, row["duration"])))
+            test_type_list = test_type_mappings.get(row["test_type"], [row["test_type"]])
+            
+            results.append({
+                "assessment": {
+                    "url": row["url"],
+                    "adaptive_support": "Yes" if row["adaptive_irt"] == "Yes" else "No",
+                    "description": row["description"],
+                    "duration": duration_value,
+                    "remote_support": "Yes" if row["remote_testing"] == "Yes" else "No",
+                    "test_type": test_type_list
+                },
+                "score": score
+            })
     
-    # Identify which domains are present in the query
-    identified_domains = {}
-    for domain, terms in skill_domains.items():
-        domain_matches = [term for term in terms if any(term in concept for concept in all_concepts)]
-        if domain_matches:
-            identified_domains[domain] = domain_matches
-    
-    return {
-        "terms": important_terms,
-        "compounds": compound_concepts,
-        "all_concepts": all_concepts,
-        "domains": identified_domains
-    }
-
-# Semantic scoring function
-def calculate_semantic_relevance(assessment, extracted_concepts):
-    semantic_data = assessment.get("semantic_concepts", {})
-    if not semantic_data:
-        return 0.0
-    
-    score = 0.0
-    
-    # Check for primary concept matches (highest weight)
-    primary_matches = sum(1 for concept in extracted_concepts["all_concepts"] 
-                         if any(primary_term in concept for primary_term in semantic_data.get("primary", [])))
-    score += primary_matches * 3.0
-    
-    # Check for secondary concept matches (medium weight)
-    secondary_matches = sum(1 for concept in extracted_concepts["all_concepts"] 
-                           if any(secondary_term in concept for secondary_term in semantic_data.get("secondary", [])))
-    score += secondary_matches * 1.5
-    
-    # Check for domain relevance
-    for domain, terms in extracted_concepts["domains"].items():
-        if domain == "language_specific":
-            # Special handling for programming languages to ensure exact matches
-            for term in terms:
-                if term in semantic_data.get("primary", []):
-                    score += 4.0  # Strong boost for exact language match
-                elif term in semantic_data.get("excluded", []):
-                    score -= 5.0  # Strong penalty for excluded languages
-        elif domain in ["programming", "technical"] and assessment["test_type"] == "Technical":
-            score += 2.0
-        elif domain == "teamwork" and "Teamwork Assessment" in assessment["name"]:
-            score += 3.0
-        elif domain == "personality" and "Personality" in assessment["test_type"]:
-            score += 3.0
-        elif domain == "cognitive" and "Cognitive" in assessment["test_type"]:
-            score += 3.0
-        elif domain == "business" and "Business" in assessment["name"]:
-            score += 3.0
-    
-    # Check for exclusions (negative weight)
-    exclusion_matches = sum(1 for concept in extracted_concepts["all_concepts"] 
-                           if any(excluded_term in concept for excluded_term in semantic_data.get("excluded", [])))
-    score -= exclusion_matches * 4.0
-    
-    # Special case handling for combined skillsets
-    if "java" in extracted_concepts["terms"] and any(team_term in " ".join(extracted_concepts["all_concepts"]) 
-                                                  for team_term in ["team", "teamwork", "collaborate"]):
-        if "Java Programming Test" in assessment["name"] or "Teamwork Assessment" in assessment["name"]:
-            score += 2.5  # Boost both Java and Teamwork assessments
-    
-    # Duration constraints - if mentioned in query
-    duration_terms = ["time", "minutes", "duration", "quick", "fast", "short", "long"]
-    if any(term in " ".join(extracted_concepts["all_concepts"]) for term in duration_terms):
-        # Prefer shorter tests if query mentions time constraints
-        duration_mins = int(''.join(filter(str.isdigit, assessment["duration"])))
-        if duration_mins <= 20:
-            score += 1.0  # Boost for short tests
-        elif duration_mins >= 45:
-            score -= 1.0  # Penalty for long tests
-    
-    return max(score, 0.0)  # Ensure we don't return negative scores
+    # Sort by score and return
+    sorted_results = sorted(results, key=lambda x: x["score"], reverse=True)
+    return sorted_results
 
 @app.route('/recommend', methods=['POST'])
 def recommend():
@@ -251,77 +272,43 @@ def recommend():
         if not query:
             return jsonify({"error": "Missing query"}), 400
         
-        # Extract semantic concepts from query
-        extracted_concepts = extract_key_concepts(query)
+        # Get scored and filtered assessments
+        assessment_results = filter_and_score_assessments(query, df)
         
-        # Calculate vector embedding for query for comparison
-        query_vec = get_embedding(query)
+        # Take only the relevant assessments (max 10)
+        relevant_assessments = [result["assessment"] for result in assessment_results[:10]]
         
-        # Create results dataframe with all relevant data
-        results_df = df.copy()
+        # If no assessments were found to be relevant, fall back to basic matching
+        if not relevant_assessments:
+            # Get most relevant by test type
+            if "java" in query.lower():
+                java_test = df[df["name"] == "Java Programming Test"].iloc[0]
+                test_type_list = test_type_mappings.get(java_test["test_type"], [java_test["test_type"]])
+                relevant_assessments = [{
+                    "url": java_test["url"],
+                    "adaptive_support": "Yes" if java_test["adaptive_irt"] == "Yes" else "No",
+                    "description": java_test["description"],
+                    "duration": int(''.join(filter(str.isdigit, java_test["duration"]))),
+                    "remote_support": "Yes" if java_test["remote_testing"] == "Yes" else "No",
+                    "test_type": test_type_list
+                }]
         
-        # Calculate semantic relevance score
-        results_df["semantic_score"] = results_df.apply(
-            lambda row: calculate_semantic_relevance({
-                "name": row["name"],
-                "test_type": row["test_type"],
-                "semantic_concepts": row["semantic_concepts"],
-                "duration": row["duration"]
-            }, extracted_concepts), 
-            axis=1
-        )
-        
-        # Calculate embedding similarity score
-        for index, row in results_df.iterrows():
-            try:
-                doc_vec = get_embedding(row["full_text"])
-                similarity_score = cosine_similarity([query_vec], [doc_vec])[0][0]
-                results_df.at[index, "embedding_score"] = similarity_score
-            except Exception as e:
-                print(f"Error processing assessment {row.get('name', 'Unknown')}: {e}")
-                results_df.at[index, "embedding_score"] = 0.0
-        
-        # Combine scores (weighted approach)
-        results_df["final_score"] = (0.7 * results_df["semantic_score"]) + (0.3 * results_df["embedding_score"])
-        
-        # Sort by combined score
-        sorted_df = results_df.sort_values("final_score", ascending=False)
-        
-        # Determine how many results to return (between 1 and 10)
-        max_results = 10
-        min_results = 1
-        score_threshold = 0.5
-        relevant_df = sorted_df[sorted_df["final_score"] >= score_threshold]
-        
-        if len(relevant_df) < min_results:
-            top_df = sorted_df.head(min_results)  # Show at least minimum results
-        elif len(relevant_df) > max_results:
-            top_df = relevant_df.head(max_results)  # Limit to max results
-        else:
-            top_df = relevant_df
-            
-        # Format results to match the exact format required by API documentation
-        results = []
-        for _, row in top_df.iterrows():
-            # Extract numerical duration value
-            duration_value = int(''.join(filter(str.isdigit, row["duration"])))
-            
-            # Map test_type to the required format
-            test_type_list = test_type_mappings.get(row["test_type"], [row["test_type"]])
-            
-            result = {
-                "url": row["url"],
-                "adaptive_support": "Yes" if row["adaptive_irt"] == "Yes" else "No",
-                "description": row["description"],
-                "duration": duration_value,
-                "remote_support": "Yes" if row["remote_testing"] == "Yes" else "No",
+        # Ensure we have at least one result
+        if not relevant_assessments:
+            general_test = df[df["name"] == "General Ability Test"].iloc[0]
+            test_type_list = test_type_mappings.get(general_test["test_type"], [general_test["test_type"]])
+            relevant_assessments = [{
+                "url": general_test["url"],
+                "adaptive_support": "Yes" if general_test["adaptive_irt"] == "Yes" else "No",
+                "description": general_test["description"],
+                "duration": int(''.join(filter(str.isdigit, general_test["duration"]))),
+                "remote_support": "Yes" if general_test["remote_testing"] == "Yes" else "No",
                 "test_type": test_type_list
-            }
-            results.append(result)
+            }]
         
         # Construct response in the exact format specified in the documentation
         response = {
-            "recommended_assessments": results
+            "recommended_assessments": relevant_assessments
         }
         
         return jsonify(response)
