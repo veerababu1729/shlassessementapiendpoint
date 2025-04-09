@@ -3,6 +3,7 @@ import pandas as pd
 import google.generativeai as genai
 import os
 import json
+import re
 
 app = Flask(__name__)
 
@@ -12,7 +13,13 @@ def health_check():
     return {"status": "healthy"}
 
 # Configure Gemini API key
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+api_key = os.environ.get("GEMINI_API_KEY")
+if not api_key:
+    print("WARNING: GEMINI_API_KEY not found in environment variables")
+    # Continue without API key, fallback method will be used
+
+if api_key:
+    genai.configure(api_key=api_key)
 
 # Load assessments dataset from CSV file
 df = pd.read_csv("assessments.csv")
@@ -43,10 +50,82 @@ test_type_mappings = {
     "Simulation": ["Competencies"]
 }
 
+# Simple keyword-based fallback when Gemini fails
+def keyword_based_fallback(query, assessments_data):
+    print("Using keyword-based fallback matching")
+    query = query.lower()
+    scores = {}
+    
+    # Define role/skill keywords and their related assessments
+    keyword_matches = {
+        "python": ["Python Programming Test", "Verify Coding Pro"],
+        "java": ["Java Programming Test", "Verify Coding Pro"],
+        "javascript": ["JavaScript Test", "Verify Coding Pro"],
+        "js": ["JavaScript Test", "Verify Coding Pro"],
+        "sql": ["SQL Test"],
+        "database": ["SQL Test"],
+        "developer": ["Verify Coding Pro", "Python Programming Test", "Java Programming Test", "JavaScript Test"],
+        "programming": ["Verify Coding Pro", "Python Programming Test", "Java Programming Test", "JavaScript Test"],
+        "leadership": ["OPQ Personality Assessment", "Business Simulation"],
+        "manager": ["OPQ Personality Assessment", "Business Simulation"],
+        "teamwork": ["Teamwork Assessment", "OPQ Personality Assessment"],
+        "analytical": ["Verify Numerical Reasoning Test", "General Ability Test"],
+        "communication": ["Verify Verbal Reasoning Test", "OPQ Personality Assessment"],
+        "personality": ["OPQ Personality Assessment", "Workplace Personality Assessment"],
+    }
+    
+    # Score each assessment based on keyword matches
+    for _, row in assessments_data.iterrows():
+        score = 0
+        name_desc = (row["name"] + " " + row["description"]).lower()
+        
+        # Direct keyword matching
+        for keyword in query.split():
+            keyword = keyword.strip(",.;:()[]{}\"'")
+            if keyword in name_desc:
+                score += 2
+            
+            # Check predefined keyword matches
+            if keyword in keyword_matches:
+                if row["name"] in keyword_matches[keyword]:
+                    score += 3
+        
+        scores[row["name"]] = score
+    
+    # Return top 3 matches with positive scores, or General Ability Test as fallback
+    relevant = [k for k, v in sorted(scores.items(), key=lambda x: x[1], reverse=True) if v > 0][:3]
+    if not relevant:
+        relevant = ["General Ability Test"]
+        if "General Ability Test" not in assessments_data["name"].values:
+            relevant = [assessments_data["name"].iloc[0]]
+    
+    return relevant
+
 # Function to use Gemini to match assessments with query
 def match_assessments_with_gemini(query, assessments_data):
+    if not api_key:
+        return keyword_based_fallback(query, assessments_data)
+    
     try:
-        model = genai.GenerativeModel('gemini-pro')
+        # List available models to help with debugging
+        try:
+            print("Available Gemini models:")
+            for model in genai.list_models():
+                if "gemini" in model.name.lower():
+                    print(f"- {model.name}")
+        except Exception as e:
+            print(f"Could not list models: {e}")
+        
+        # Try to use gemini-1.5-pro first, fall back to other versions if needed
+        try:
+            model = genai.GenerativeModel('gemini-1.5-pro')
+        except Exception as e1:
+            try:
+                print(f"Could not load gemini-1.5-pro: {e1}, trying gemini-pro")
+                model = genai.GenerativeModel('gemini-pro')
+            except Exception as e2:
+                print(f"Could not load gemini-pro: {e2}, falling back to keyword matching")
+                return keyword_based_fallback(query, assessments_data)
         
         # Create a context with all assessment information
         assessments_context = []
@@ -90,19 +169,23 @@ def match_assessments_with_gemini(query, assessments_data):
         # Parse the JSON response
         try:
             # Find JSON content between curly braces
-            import re
             json_match = re.search(r'({.*})', response_text.replace('\n', ' '), re.DOTALL)
             if json_match:
                 result = json.loads(json_match.group(1))
-                return result.get("relevant_assessments", [])
-            return []
+                assessments = result.get("relevant_assessments", [])
+                if assessments:
+                    return assessments
+            
+            print(f"Could not extract JSON from Gemini response. Falling back to keyword matching.")
+            print(f"Raw response: {response_text}")
+            return keyword_based_fallback(query, assessments_data)
         except json.JSONDecodeError as e:
             print(f"Error parsing Gemini response: {e}")
             print(f"Response was: {response_text}")
-            return []
+            return keyword_based_fallback(query, assessments_data)
     except Exception as e:
         print(f"Error in Gemini matching: {e}")
-        return []
+        return keyword_based_fallback(query, assessments_data)
 
 @app.route('/recommend', methods=['POST'])
 def recommend():
@@ -113,7 +196,7 @@ def recommend():
         if not query:
             return jsonify({"error": "Missing query"}), 400
         
-        # Get relevant assessment names using Gemini
+        # Get relevant assessment names using Gemini or fallback
         relevant_assessment_names = match_assessments_with_gemini(query, df)
         
         # Filter the DataFrame to include only relevant assessments
@@ -128,7 +211,12 @@ def recommend():
         # Format the assessment data for the response
         recommended_assessments = []
         for _, row in relevant_df.iterrows():
-            duration_value = int(''.join(filter(str.isdigit, row["duration"])))
+            # Extract duration value, handling potential non-numeric characters
+            try:
+                duration_value = int(''.join(filter(str.isdigit, str(row["duration"]))))
+            except:
+                duration_value = 30  # Default duration if extraction fails
+                
             test_type_list = test_type_mappings.get(row["test_type"], [row["test_type"]])
             
             assessment = {
@@ -145,7 +233,11 @@ def recommend():
         if not recommended_assessments:
             # Absolute fallback - use first assessment in dataset
             first_row = df.iloc[0]
-            duration_value = int(''.join(filter(str.isdigit, first_row["duration"])))
+            try:
+                duration_value = int(''.join(filter(str.isdigit, str(first_row["duration"]))))
+            except:
+                duration_value = 30
+                
             test_type_list = test_type_mappings.get(first_row["test_type"], [first_row["test_type"]])
             
             fallback_assessment = {
@@ -167,7 +259,9 @@ def recommend():
         
         return jsonify(response)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        print(f"Error in recommendation endpoint: {e}")
+        return jsonify({"error": str(e), "status": "failed"}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port, debug=True)
