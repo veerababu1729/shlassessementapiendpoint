@@ -8,7 +8,7 @@ import re
 
 app = Flask(__name__)
 
-# ✅ Health check endpoint for API status
+# Health check endpoint for API status
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}
@@ -16,28 +16,13 @@ def health_check():
 # Configure Gemini API key
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 
-# Load assessments dataset with the exact column names from your data
-columns = ["name", "url", "remote_testing", "adaptive_irt", "duration", "test_type"]
-data = [
-    ["Verify Numerical Reasoning Test", "https://www.shl.com/solutions/products/verify-numerical-reasoning-test/", "Yes", "Yes", "18 minutes", "Cognitive"],
-    ["Verify Verbal Reasoning Test", "https://www.shl.com/solutions/products/verify-verbal-reasoning-test/", "Yes", "Yes", "17 minutes", "Cognitive"],
-    ["Verify Coding Pro", "https://www.shl.com/solutions/products/verify-coding-pro/", "Yes", "No", "60 minutes", "Technical"],
-    ["OPQ Personality Assessment", "https://www.shl.com/solutions/products/opq/", "Yes", "No", "25 minutes", "Personality"],
-    ["Java Programming Test", "https://www.shl.com/solutions/products/java-programming-test/", "Yes", "No", "30 minutes", "Technical"],
-    ["Python Programming Test", "https://www.shl.com/solutions/products/python-programming-test/", "Yes", "No", "30 minutes", "Technical"],
-    ["SQL Test", "https://www.shl.com/solutions/products/sql-test/", "Yes", "No", "30 minutes", "Technical"],
-    ["JavaScript Test", "https://www.shl.com/solutions/products/javascript-test/", "Yes", "No", "30 minutes", "Technical"],
-    ["Workplace Personality Assessment", "https://www.shl.com/solutions/products/workplace-personality/", "Yes", "No", "20 minutes", "Personality"],
-    ["Business Simulation", "https://www.shl.com/solutions/products/business-simulation/", "Yes", "No", "40 minutes", "Simulation"],
-    ["General Ability Test", "https://www.shl.com/solutions/products/general-ability/", "Yes", "Yes", "30 minutes", "Cognitive"],
-    ["Teamwork Assessment", "https://www.shl.com/solutions/products/teamwork-assessment/", "Yes", "No", "15 minutes", "Behavioral"]
-]
-df = pd.DataFrame(data, columns=columns)
+# Load assessments dataset from CSV file
+df = pd.read_csv("assessments.csv")
 
-# Add descriptions for each assessment (simplified for this example)
+# Add descriptions for each assessment
 descriptions = {
-    "Python Programming Test": "Multi-choice test that measures the knowledge of Python programming, databases, modules and library. For developers.",
-    "Java Programming Test": "Multi-choice test that measures the knowledge of Java programming, databases, frameworks and libraries. For developers.",
+    "Python Programming Test": "Multi-choice test that measures the knowledge of Python programming, databases, modules and library. For Mid-Professional developers.",
+    "Java Programming Test": "Multi-choice test that measures the knowledge of Java programming, databases, frameworks and libraries. For Entry-Level developers.",
     "SQL Test": "Assessment that measures SQL querying and database knowledge. For data professionals and developers.",
     "JavaScript Test": "Assessment that evaluates JavaScript programming skills including DOM manipulation and frameworks.",
     "Verify Numerical Reasoning Test": "Assessment that measures numerical reasoning ability for workplace performance.",
@@ -47,9 +32,18 @@ descriptions = {
     "Workplace Personality Assessment": "Assessment that evaluates workplace behavior and personality traits.",
     "Business Simulation": "Interactive business scenario simulation for evaluating decision-making skills.",
     "General Ability Test": "Assessment that measures general mental ability across various cognitive domains.",
-    "Teamwork Assessment": "The Technology Job Focused Assessment assesses key behavioral attributes required for success in fast-paced technology environments."
+    "Teamwork Assessment": "The Technology Job Focused Assessment assesses key behavioral attributes required for success in fast-paced, rapidly changing technology work environments."
 }
 df["description"] = df["name"].map(descriptions)
+
+# Define test type mappings for API response format
+test_type_mappings = {
+    "Cognitive": ["Knowledge & Skills"],
+    "Technical": ["Knowledge & Skills"],
+    "Personality": ["Personality & Behaviour"],
+    "Behavioral": ["Competencies", "Personality & Behaviour"],
+    "Simulation": ["Competencies"]
+}
 
 # Define semantic concepts and their related terms for each assessment
 semantic_concepts = {
@@ -117,7 +111,7 @@ semantic_concepts = {
 
 # Add full_text column for embedding comparison
 df["full_text"] = df.apply(
-    lambda row: f"{row['name']} is a {row['test_type']} assessment with duration of {row['duration']}. {row['description']}", 
+    lambda row: f"{row['name']} is a {row['test_type']} assessment with duration of {row['duration']}. {row.get('description', '')}", 
     axis=1
 )
 
@@ -135,7 +129,8 @@ def get_embedding(text):
         return np.array(response["embedding"])
     except Exception as e:
         print(f"Error generating embedding: {e}")
-        raise
+        # Return a zero vector as fallback
+        return np.zeros(768)  # Adjust dimension based on your embedding model
 
 # Extract key concepts from the query
 def extract_key_concepts(query):
@@ -229,12 +224,11 @@ def calculate_semantic_relevance(assessment, extracted_concepts):
                            if any(excluded_term in concept for excluded_term in semantic_data.get("excluded", [])))
     score -= exclusion_matches * 4.0
     
-    # Special case: If looking specifically for Java developers but not JavaScript
-    if "java" in extracted_concepts["terms"] and "javascript" not in extracted_concepts["terms"] and "js" not in extracted_concepts["terms"]:
-        if "Java Programming Test" in assessment["name"]:
-            score += 2.0  # Boost Java test
-        elif "JavaScript Test" in assessment["name"]:
-            score -= 3.0  # Penalize JavaScript test
+    # Special case handling for combined skillsets
+    if "java" in extracted_concepts["terms"] and any(team_term in " ".join(extracted_concepts["all_concepts"]) 
+                                                  for team_term in ["team", "teamwork", "collaborate"]):
+        if "Java Programming Test" in assessment["name"] or "Teamwork Assessment" in assessment["name"]:
+            score += 2.5  # Boost both Java and Teamwork assessments
     
     # Duration constraints - if mentioned in query
     duration_terms = ["time", "minutes", "duration", "quick", "fast", "short", "long"]
@@ -293,42 +287,39 @@ def recommend():
         # Sort by combined score
         sorted_df = results_df.sort_values("final_score", ascending=False)
         
-        # Determine how many results to return
-        # More sophisticated logic could be used here based on score distribution
+        # Determine how many results to return (between 1 and 10)
+        max_results = 10
+        min_results = 1
         score_threshold = 0.5
         relevant_df = sorted_df[sorted_df["final_score"] >= score_threshold]
         
-        # Ensure we show between 1-5 results
-        if len(relevant_df) == 0:
-            top_df = sorted_df.head(2)  # Show top 2 if none meet threshold
-        elif len(relevant_df) > 5:
-            top_df = relevant_df.head(5)  # Limit to top 5
+        if len(relevant_df) < min_results:
+            top_df = sorted_df.head(min_results)  # Show at least minimum results
+        elif len(relevant_df) > max_results:
+            top_df = relevant_df.head(max_results)  # Limit to max results
         else:
             top_df = relevant_df
             
-        # Format results to match the exact output shown in the screenshot
+        # Format results to match the exact format required by API documentation
         results = []
         for _, row in top_df.iterrows():
             # Extract numerical duration value
-            duration_value = ''.join(filter(str.isdigit, row["duration"]))
+            duration_value = int(''.join(filter(str.isdigit, row["duration"])))
             
-            # Format test_type as list (from the screenshot it appears test_type is an array)
-            test_type_list = [row["test_type"]]
-            if row["test_type"] == "Behavioral":
-                # For demonstration - adding multiple test types for certain assessments
-                test_type_list = ["Competencies", "Personality & Behaviour"]
+            # Map test_type to the required format
+            test_type_list = test_type_mappings.get(row["test_type"], [row["test_type"]])
             
             result = {
                 "url": row["url"],
-                "adaptive_support": row["adaptive_irt"],
+                "adaptive_support": "Yes" if row["adaptive_irt"] == "Yes" else "No",
                 "description": row["description"],
-                "duration": int(duration_value) if duration_value else 0,
-                "remote_support": row["remote_testing"],
+                "duration": duration_value,
+                "remote_support": "Yes" if row["remote_testing"] == "Yes" else "No",
                 "test_type": test_type_list
             }
             results.append(result)
         
-        # Construct response in the exact format shown in the screenshot
+        # Construct response in the exact format specified in the documentation
         response = {
             "recommended_assessments": results
         }
